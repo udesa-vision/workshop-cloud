@@ -28,21 +28,33 @@ class DataConfig:
 
 
 def get_dataloaders(config: DataConfig):
-    transform = transforms.Compose([
+    # Augmentation is applied to training data only; the validation/test
+    # split shares the same deterministic preprocessing.
+    train_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5,), (0.5,))
+    ])
+    eval_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])
 
     train_dataset = datasets.FashionMNIST(
-        root=config.dataset_root, train=True, download=config.download, transform=transform
+        root=config.dataset_root, train=True, download=config.download, transform=train_transform
+    )
+    # Separate instance so validation is NOT augmented (deterministic eval).
+    # torchvision reuses the already-downloaded files, so this costs no re-download.
+    valid_dataset = datasets.FashionMNIST(
+        root=config.dataset_root, train=True, download=config.download, transform=eval_transform
     )
     test_dataset = datasets.FashionMNIST(
-        root=config.dataset_root, train=False, download=config.download, transform=transform
+        root=config.dataset_root, train=False, download=config.download, transform=eval_transform
     )
 
     train_size = int(config.valid_ratio * len(train_dataset))
     train_set = Subset(train_dataset, range(0, train_size))
-    valid_set = Subset(train_dataset, range(train_size, len(train_dataset)))
+    valid_set = Subset(valid_dataset, range(train_size, len(valid_dataset)))
 
     train_loader = DataLoader(train_set, batch_size=config.batch_size, shuffle=True)
     valid_loader = DataLoader(valid_set, batch_size=config.batch_size, shuffle=False)

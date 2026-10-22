@@ -3,6 +3,7 @@
 Usage from the command line (run from the project root):
     uv run python -m src.train                          # defaults
     uv run python -m src.train --epochs 20 --data-dir data --download
+    uv run python -m src.train --lr 1e-3 --weight-decay 5e-4
     uv run python -m src.train --debug                  # limit batches per epoch for quick smoke test
 
 Programmatic usage:
@@ -14,7 +15,7 @@ Programmatic usage:
     data_config = DataConfig(data_dir="data", download=True)
     model = FashionCNN()
     criterion = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
     train_loader, valid_loader, _ = get_dataloaders(data_config)
 
     history = train(config, model, criterion, optimizer, (train_loader, valid_loader))
@@ -45,6 +46,8 @@ class TrainConfig:
 
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     num_epochs: int = 32
+    learning_rate: float = 1e-3
+    weight_decay: float = 5e-4
     checkpoint_dir: str = ".checkpoints"
     resume_path: Optional[str] = None
     debug: bool = False
@@ -236,6 +239,8 @@ def train(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the Fashion-MNIST CNN.")
     parser.add_argument("--epochs", type=int, default=32, help="number of epochs (default: 32)")
+    parser.add_argument("--lr", type=float, default=1e-3, help="learning rate (default: 1e-3)")
+    parser.add_argument("--weight-decay", type=float, default=5e-4, help="L2 regularization weight decay (default: 5e-4)")
     parser.add_argument("--data-dir", type=str, default=".data", help="directory with FashionMNIST data, relative to the project root (default: .data)")
     parser.add_argument("--download", action="store_true", help="download the FashionMNIST dataset if not present")
     parser.add_argument("--batch-size", type=int, default=64, help="dataloader batch size (default: 64)")
@@ -248,6 +253,8 @@ def main() -> None:
     config = TrainConfig(
         device=args.device,
         num_epochs=args.epochs,
+        learning_rate=args.lr,
+        weight_decay=args.weight_decay,
         checkpoint_dir=args.checkpoint_dir,
         resume_path=args.resume,
         debug=args.debug,
@@ -261,7 +268,11 @@ def main() -> None:
 
     model = FashionCNN().to(config.device)
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
+    )
 
     train_loader, valid_loader, _ = get_dataloaders(data_config)
 
