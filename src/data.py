@@ -23,7 +23,8 @@ class DataConfig:
 
     @property
     def dataset_root(self) -> Path:
-        return PROJECT_ROOT / self.data_dir
+        p = Path(self.data_dir)
+        return p if p.is_absolute() else PROJECT_ROOT / p
 
 
 def get_dataloaders(config: DataConfig):
