@@ -7,6 +7,11 @@ Usage from the command line (run from the project root):
     uv run python -m src.train --seed 123               # reproducible run with a custom seed
     uv run python -m src.train --debug                  # limit batches per epoch for quick smoke test
 
+Without --resume, each invocation creates a new run_<n> folder under
+--checkpoint-dir (default .checkpoints), so checkpoints are never overwritten.
+With --resume, training continues from the given checkpoint and checkpoints are
+saved in that checkpoint's parent folder (i.e. the run it belongs to).
+
 Programmatic usage:
     from src.seed import seed_everything
     from src.data import DataConfig, get_dataloaders
@@ -44,6 +49,25 @@ from src.seed import seed_everything
 MAX_BATCHES_PER_EPOCH = 10
 
 
+def next_run_dir(checkpoint_dir: str) -> str:
+    """Return the next available run directory under checkpoint_dir (run_<n+1>).
+
+    Scans for existing run_<n> folders, picks the largest n, creates a new
+    run_<n+1> directory, and returns its path.
+    """
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    run_numbers = []
+    for name in os.listdir(checkpoint_dir):
+        if name.startswith("run_"):
+            suffix = name[len("run_"):]
+            if suffix.isdigit():
+                run_numbers.append(int(suffix))
+    next_number = (max(run_numbers) + 1) if run_numbers else 1
+    run_dir = os.path.join(checkpoint_dir, f"run_{next_number}")
+    os.makedirs(run_dir, exist_ok=True)
+    return run_dir
+
+
 @dataclass
 class TrainConfig:
     """Training hyperparameters and settings."""
@@ -52,8 +76,8 @@ class TrainConfig:
     num_epochs: int = 40
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
-    checkpoint_dir: str = ".checkpoints"
-    resume_path: Optional[str] = None
+    checkpoint_dir: str = ".checkpoints"  # base dir that holds run_# folders
+    resume_path: Optional[str] = None  # resume continues/saves next to this file
     debug: bool = False
     seed: int = 42
 
@@ -199,6 +223,18 @@ def train(
     train_loader, valid_loader = loaders
     device = train_config.device
 
+    # Resolve where checkpoints go:
+    #   - resume: continue writing next to the resumed checkpoint
+    #   - otherwise: create a fresh run_<n+1> folder
+    if train_config.resume_path is not None:
+        run_dir = os.path.dirname(train_config.resume_path)
+        os.makedirs(run_dir, exist_ok=True)
+        print(f"continuing run in: {run_dir}")
+    else:
+        run_dir = next_run_dir(train_config.checkpoint_dir)
+        print(f"new run directory: {run_dir}")
+    train_config.checkpoint_dir = run_dir
+
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=3
     )
@@ -271,8 +307,8 @@ def main() -> None:
     parser.add_argument("--data-dir", type=str, default=".data", help="directory with FashionMNIST data, relative to the project root (default: .data)")
     parser.add_argument("--download", action="store_true", help="download the FashionMNIST dataset if not present")
     parser.add_argument("--batch-size", type=int, default=64, help="dataloader batch size (default: 64)")
-    parser.add_argument("--checkpoint-dir", type=str, default=".checkpoints", help="where to save checkpoints (default: .checkpoints)")
-    parser.add_argument("--resume", type=str, default=None, help="path to a checkpoint to resume training from")
+    parser.add_argument("--checkpoint-dir", type=str, default=".checkpoints", help="base directory that holds run_# folders (default: .checkpoints)")
+    parser.add_argument("--resume", type=str, default=None, help="path to a checkpoint to resume from; checkpoints are saved next to it, continuing that run")
     parser.add_argument("--device", type=str, default=("cuda" if torch.cuda.is_available() else "cpu"), help="device to train on (default: cuda if available else cpu)")
     parser.add_argument("--seed", type=int, default=42, help="random seed for reproducibility (default: 42)")
     parser.add_argument("--debug", action="store_true", help="only run a few batches per epoch for a quick smoke test")
@@ -311,9 +347,12 @@ def main() -> None:
 
     # Brief summary so results are visible without needing to inspect the history object.
     print("\n--- training finished ---")
-    print(f"final train_loss: {history['train_loss'][-1]:.4f} - train_acc: {history['train_acc'][-1]:.4f}")
-    print(f"final valid_loss: {history['valid_loss'][-1]:.4f} - valid_acc: {history['valid_acc'][-1]:.4f}")
-    print(f"best valid_loss:  {min(history['valid_loss']):.4f}")
+    if history["train_loss"]:
+        print(f"final train_loss: {history['train_loss'][-1]:.4f} - train_acc: {history['train_acc'][-1]:.4f}")
+        print(f"final valid_loss: {history['valid_loss'][-1]:.4f} - valid_acc: {history['valid_acc'][-1]:.4f}")
+        print(f"best valid_loss:  {min(history['valid_loss']):.4f}")
+    else:
+        print("no epochs ran (resumed checkpoint already reached --epochs); nothing new to report")
 
 
 if __name__ == "__main__":
