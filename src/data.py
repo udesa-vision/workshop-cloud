@@ -31,7 +31,11 @@ def get_dataloaders(config: DataConfig):
     # Augmentation is applied to training data only; the validation/test
     # split shares the same deterministic preprocessing.
     train_transform = transforms.Compose([
+        transforms.RandomCrop(28, padding=4),
         transforms.RandomHorizontalFlip(),
+        transforms.RandomRotation(degrees=10),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2),
+        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])

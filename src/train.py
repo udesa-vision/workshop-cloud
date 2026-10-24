@@ -49,7 +49,7 @@ class TrainConfig:
     """Training hyperparameters and settings."""
 
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    num_epochs: int = 32
+    num_epochs: int = 40
     learning_rate: float = 1e-3
     weight_decay: float = 5e-4
     checkpoint_dir: str = ".checkpoints"
@@ -119,7 +119,9 @@ def valid_one_epoch(device, loader, model, criterion, debug: bool = False) -> Tu
     return epoch_loss, epoch_acc
 
 
-def load_checkpoint(resume: Optional[str], device, model, optimizer=None) -> _CheckpointState:
+def load_checkpoint(
+    resume: Optional[str], device, model, optimizer=None, scheduler=None
+) -> _CheckpointState:
     """Load a checkpoint if it exists. Returns (start_epoch, best_loss)."""
     state = _CheckpointState()
 
@@ -130,6 +132,8 @@ def load_checkpoint(resume: Optional[str], device, model, optimizer=None) -> _Ch
         model.load_state_dict(checkpoint["model_state_dict"])
         if optimizer is not None:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if scheduler is not None and checkpoint.get("scheduler_state_dict") is not None:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
         state.start_epoch = checkpoint.get("epoch", 0)
         state.best_loss = checkpoint.get("valid_loss", float("inf"))
@@ -148,6 +152,7 @@ def save_checkpoint(
     valid_acc: float,
     is_best: bool,
     seed: int = 42,
+    scheduler=None,
 ) -> None:
     """Save a checkpoint to checkpoint_dir (last every epoch, best on improvement)."""
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -157,6 +162,9 @@ def save_checkpoint(
         "seed": seed,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
+        "scheduler_state_dict": (
+            scheduler.state_dict() if scheduler is not None else None
+        ),
         "train_loss": train_loss,
         "train_acc": train_acc,
         "valid_loss": valid_loss,
@@ -191,8 +199,16 @@ def train(
     train_loader, valid_loader = loaders
     device = train_config.device
 
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=3
+    )
+
     state = load_checkpoint(
-        train_config.resume_path, device, model, optimizer=optimizer
+        train_config.resume_path,
+        device,
+        model,
+        optimizer=optimizer,
+        scheduler=scheduler,
     )
     start_epoch = state.start_epoch
     best_loss = state.best_loss
@@ -212,6 +228,7 @@ def train(
         valid_loss, valid_acc = valid_one_epoch(
             device, valid_loader, model, criterion, debug=train_config.debug
         )
+        scheduler.step(valid_loss)
 
         history["train_loss"].append(train_loss)
         history["train_acc"].append(train_acc)
@@ -221,7 +238,8 @@ def train(
         print(
             f"epoch [{epoch + 1}/{train_config.num_epochs}] "
             f"- train_loss: {train_loss:.4f} - train_acc: {train_acc:.4f} "
-            f"- valid_loss: {valid_loss:.4f} - valid_acc: {valid_acc:.4f}"
+            f"- valid_loss: {valid_loss:.4f} - valid_acc: {valid_acc:.4f} "
+            f"- lr: {optimizer.param_groups[0]['lr']:.2e}"
         )
 
         is_best = valid_loss < best_loss
@@ -239,6 +257,7 @@ def train(
             valid_acc,
             is_best=is_best,
             seed=train_config.seed,
+            scheduler=scheduler,
         )
 
     return history
@@ -246,7 +265,7 @@ def train(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train the Fashion-MNIST CNN.")
-    parser.add_argument("--epochs", type=int, default=32, help="number of epochs (default: 32)")
+    parser.add_argument("--epochs", type=int, default=40, help="number of epochs (default: 40)")
     parser.add_argument("--lr", type=float, default=1e-3, help="learning rate (default: 1e-3)")
     parser.add_argument("--weight-decay", type=float, default=5e-4, help="L2 regularization weight decay (default: 5e-4)")
     parser.add_argument("--data-dir", type=str, default=".data", help="directory with FashionMNIST data, relative to the project root (default: .data)")
@@ -279,7 +298,7 @@ def main() -> None:
     )
 
     model = FashionCNN().to(config.device)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = torch.optim.Adam(
         model.parameters(),
         lr=config.learning_rate,
