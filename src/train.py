@@ -4,13 +4,16 @@ Usage from the command line (run from the project root):
     uv run python -m src.train                          # defaults
     uv run python -m src.train --epochs 20 --data-dir data --download
     uv run python -m src.train --lr 1e-3 --weight-decay 5e-4
+    uv run python -m src.train --seed 123               # reproducible run with a custom seed
     uv run python -m src.train --debug                  # limit batches per epoch for quick smoke test
 
 Programmatic usage:
+    from src.seed import seed_everything
     from src.data import DataConfig, get_dataloaders
     from src.models import FashionCNN
     from src.train import TrainConfig, train
 
+    seed_everything(42)  # call before building the model/optimizer/dataloaders for reproducibility
     config = TrainConfig(device="cuda", num_epochs=20, checkpoint_dir="checkpoints")
     data_config = DataConfig(data_dir="data", download=True)
     model = FashionCNN()
@@ -34,6 +37,7 @@ import tqdm
 
 from src.data import DataConfig, get_dataloaders
 from src.models import FashionCNN
+from src.seed import seed_everything
 
 # When train_config.debug is True, only run this many batches per epoch
 # (hardcoded on purpose to keep the config small).
@@ -51,6 +55,7 @@ class TrainConfig:
     checkpoint_dir: str = ".checkpoints"
     resume_path: Optional[str] = None
     debug: bool = False
+    seed: int = 42
 
 
 @dataclass
@@ -142,12 +147,14 @@ def save_checkpoint(
     valid_loss: float,
     valid_acc: float,
     is_best: bool,
+    seed: int = 42,
 ) -> None:
     """Save a checkpoint to checkpoint_dir (last every epoch, best on improvement)."""
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     checkpoint = {
         "epoch": epoch + 1,
+        "seed": seed,
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
         "train_loss": train_loss,
@@ -231,6 +238,7 @@ def train(
             valid_loss,
             valid_acc,
             is_best=is_best,
+            seed=train_config.seed,
         )
 
     return history
@@ -247,6 +255,7 @@ def main() -> None:
     parser.add_argument("--checkpoint-dir", type=str, default=".checkpoints", help="where to save checkpoints (default: .checkpoints)")
     parser.add_argument("--resume", type=str, default=None, help="path to a checkpoint to resume training from")
     parser.add_argument("--device", type=str, default=("cuda" if torch.cuda.is_available() else "cpu"), help="device to train on (default: cuda if available else cpu)")
+    parser.add_argument("--seed", type=int, default=42, help="random seed for reproducibility (default: 42)")
     parser.add_argument("--debug", action="store_true", help="only run a few batches per epoch for a quick smoke test")
     args = parser.parse_args()
 
@@ -258,7 +267,10 @@ def main() -> None:
         checkpoint_dir=args.checkpoint_dir,
         resume_path=args.resume,
         debug=args.debug,
+        seed=args.seed,
     )
+
+    seed_everything(config.seed)
 
     data_config = DataConfig(
         data_dir=args.data_dir,
