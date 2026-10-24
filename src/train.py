@@ -12,6 +12,11 @@ Without --resume, each invocation creates a new run_<n> folder under
 With --resume, training continues from the given checkpoint and checkpoints are
 saved in that checkpoint's parent folder (i.e. the run it belongs to).
 
+Each run folder contains the checkpoints plus reporting artifacts:
+    run_report.txt   - parameter snapshot (appended each time the run resumes)
+    history.csv      - one row per epoch (loss, accuracy, lr)
+    curves.png       - loss/accuracy curves, updated after every epoch
+
 Programmatic usage:
     from src.seed import seed_everything
     from src.data import DataConfig, get_dataloaders
@@ -42,6 +47,12 @@ import tqdm
 
 from src.data import DataConfig, get_dataloaders
 from src.models import FashionCNN
+from src.reporting import (
+    append_history_csv,
+    load_history_csv,
+    plot_history,
+    write_run_report,
+)
 from src.seed import seed_everything
 
 # When train_config.debug is True, only run this many batches per epoch
@@ -215,8 +226,14 @@ def train(
     criterion,
     optimizer,
     loaders: Tuple[DataLoader, DataLoader],
+    data_config: Optional[DataConfig] = None,
 ) -> dict:
     """Train the model and return a history dict for plotting.
+
+    Each run writes the following artifacts into its run directory:
+        run_report.txt   - parameter snapshot (appended on resume)
+        history.csv      - one row per completed epoch (loss, accuracy, lr)
+        curves.png       - loss/accuracy curves, updated after every epoch
 
     Args:
         train_config: training configuration (device, num_epochs, ...).
@@ -224,6 +241,8 @@ def train(
         criterion: loss function.
         optimizer: optimizer.
         loaders: (train_loader, valid_loader) tuple.
+        data_config: optional data configuration; when provided its
+            parameters are included in run_report.txt.
 
     Returns:
         history dict with keys:
@@ -245,6 +264,8 @@ def train(
         print(f"new run directory: {run_dir}")
     train_config.checkpoint_dir = run_dir
 
+    write_run_report(run_dir, train_config, data_config, model, optimizer, criterion)
+
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-5
     )
@@ -259,7 +280,7 @@ def train(
     start_epoch = state.start_epoch
     best_loss = state.best_loss
 
-    history = {
+    history = load_history_csv(run_dir) or {
         "train_loss": [],
         "train_acc": [],
         "valid_loss": [],
@@ -283,6 +304,18 @@ def train(
         history["train_acc"].append(train_acc)
         history["valid_loss"].append(valid_loss)
         history["valid_acc"].append(valid_acc)
+
+        current_lr = optimizer.param_groups[0]["lr"]
+        append_history_csv(
+            run_dir,
+            epoch + 1,
+            train_loss,
+            train_acc,
+            valid_loss,
+            valid_acc,
+            current_lr,
+        )
+        plot_history(run_dir, history)
 
         print(
             f"epoch [{epoch + 1}/{train_config.num_epochs}] "
@@ -365,7 +398,14 @@ def main() -> None:
 
     train_loader, valid_loader, _ = get_dataloaders(data_config)
 
-    history = train(config, model, criterion, optimizer, (train_loader, valid_loader))
+    history = train(
+        config,
+        model,
+        criterion,
+        optimizer,
+        (train_loader, valid_loader),
+        data_config=data_config,
+    )
 
     # Brief summary so results are visible without needing to inspect the history object.
     print("\n--- training finished ---")
