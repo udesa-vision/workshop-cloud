@@ -49,6 +49,15 @@ from src.seed import seed_everything
 MAX_BATCHES_PER_EPOCH = 10
 
 
+def default_device() -> str:
+    """Return the best available device: cuda > mps > cpu."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def next_run_dir(checkpoint_dir: str) -> str:
     """Return the next available run directory under checkpoint_dir (run_<n+1>).
 
@@ -72,10 +81,11 @@ def next_run_dir(checkpoint_dir: str) -> str:
 class TrainConfig:
     """Training hyperparameters and settings."""
 
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    device: str = default_device()
     num_epochs: int = 40
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
+    patience: int = 5
     checkpoint_dir: str = ".checkpoints"  # base dir that holds run_# folders
     resume_path: Optional[str] = None  # resume continues/saves next to this file
     debug: bool = False
@@ -236,7 +246,7 @@ def train(
     train_config.checkpoint_dir = run_dir
 
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3
+        optimizer, mode="min", factor=0.5, patience=3, min_lr=1e-5
     )
 
     state = load_checkpoint(
@@ -255,6 +265,9 @@ def train(
         "valid_loss": [],
         "valid_acc": [],
     }
+
+    # Early stopping: stop if valid_loss does not improve for `patience` epochs.
+    epochs_without_improvement = 0
 
     print("\n--- starting training ---")
     for epoch in range(start_epoch, train_config.num_epochs):
@@ -281,6 +294,9 @@ def train(
         is_best = valid_loss < best_loss
         if is_best:
             best_loss = valid_loss
+            epochs_without_improvement = 0
+        else:
+            epochs_without_improvement += 1
 
         save_checkpoint(
             train_config.checkpoint_dir,
@@ -296,6 +312,10 @@ def train(
             scheduler=scheduler,
         )
 
+        if epochs_without_improvement >= train_config.patience:
+            print(f"early stopping: no improvement for {train_config.patience} consecutive epochs")
+            break
+
     return history
 
 
@@ -304,12 +324,13 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=40, help="number of epochs (default: 40)")
     parser.add_argument("--lr", type=float, default=1e-3, help="learning rate (default: 1e-3)")
     parser.add_argument("--weight-decay", type=float, default=1e-4, help="L2 regularization weight decay (default: 1e-4)")
+    parser.add_argument("--patience", type=int, default=5, help="early stopping patience in epochs (default: 5)")
     parser.add_argument("--data-dir", type=str, default=".data", help="directory with FashionMNIST data, relative to the project root (default: .data)")
     parser.add_argument("--download", action="store_true", help="download the FashionMNIST dataset if not present")
     parser.add_argument("--batch-size", type=int, default=64, help="dataloader batch size (default: 64)")
     parser.add_argument("--checkpoint-dir", type=str, default=".checkpoints", help="base directory that holds run_# folders (default: .checkpoints)")
     parser.add_argument("--resume", type=str, default=None, help="path to a checkpoint to resume from; checkpoints are saved next to it, continuing that run")
-    parser.add_argument("--device", type=str, default=("cuda" if torch.cuda.is_available() else "cpu"), help="device to train on (default: cuda if available else cpu)")
+    parser.add_argument("--device", type=str, default=default_device(), help="device to train on (default: cuda if available, else mps if available, else cpu)")
     parser.add_argument("--seed", type=int, default=42, help="random seed for reproducibility (default: 42)")
     parser.add_argument("--debug", action="store_true", help="only run a few batches per epoch for a quick smoke test")
     args = parser.parse_args()
@@ -319,6 +340,7 @@ def main() -> None:
         num_epochs=args.epochs,
         learning_rate=args.lr,
         weight_decay=args.weight_decay,
+        patience=args.patience,
         checkpoint_dir=args.checkpoint_dir,
         resume_path=args.resume,
         debug=args.debug,

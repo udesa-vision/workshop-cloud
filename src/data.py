@@ -32,10 +32,9 @@ def get_dataloaders(config: DataConfig):
     # split shares the same deterministic preprocessing.
     train_transform = transforms.Compose([
         transforms.RandomCrop(28, padding=4),
+        transforms.RandomRotation(degrees=8),
         transforms.RandomHorizontalFlip(),
-        # transforms.RandomRotation(degrees=10),  # disabled: slows early learning too much
-        # transforms.ColorJitter(brightness=0.2, contrast=0.2),  # disabled: marginal on grayscale
-        transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
+        transforms.RandomAffine(degrees=0, translate=(0.08, 0.08)),
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])
