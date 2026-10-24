@@ -17,7 +17,7 @@ class FashionCNN(nn.Module):
             nn.Flatten(),
             nn.Linear(64 * 7 * 7, 128),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(128, 10) # 10 clases de ropa
         )
 
