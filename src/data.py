@@ -33,9 +33,9 @@ def get_dataloaders(config: DataConfig):
     train_transform = transforms.Compose([
         transforms.RandomCrop(28, padding=4),
         transforms.RandomHorizontalFlip(),
-        transforms.RandomRotation(degrees=10),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2),
-        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1)),
+        # transforms.RandomRotation(degrees=10),  # disabled: slows early learning too much
+        # transforms.ColorJitter(brightness=0.2, contrast=0.2),  # disabled: marginal on grayscale
+        transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])

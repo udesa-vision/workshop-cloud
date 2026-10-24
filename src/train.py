@@ -51,7 +51,7 @@ class TrainConfig:
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     num_epochs: int = 40
     learning_rate: float = 1e-3
-    weight_decay: float = 5e-4
+    weight_decay: float = 1e-4
     checkpoint_dir: str = ".checkpoints"
     resume_path: Optional[str] = None
     debug: bool = False
@@ -267,7 +267,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Train the Fashion-MNIST CNN.")
     parser.add_argument("--epochs", type=int, default=40, help="number of epochs (default: 40)")
     parser.add_argument("--lr", type=float, default=1e-3, help="learning rate (default: 1e-3)")
-    parser.add_argument("--weight-decay", type=float, default=5e-4, help="L2 regularization weight decay (default: 5e-4)")
+    parser.add_argument("--weight-decay", type=float, default=1e-4, help="L2 regularization weight decay (default: 1e-4)")
     parser.add_argument("--data-dir", type=str, default=".data", help="directory with FashionMNIST data, relative to the project root (default: .data)")
     parser.add_argument("--download", action="store_true", help="download the FashionMNIST dataset if not present")
     parser.add_argument("--batch-size", type=int, default=64, help="dataloader batch size (default: 64)")
